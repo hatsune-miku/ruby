@@ -379,7 +379,7 @@ class Matrix
   end
 
   private def set_value(row, col, value)
-    raise ErrDimensionMismatch, "Expected a a value, got a #{value.class}" if value.respond_to?(:to_matrix)
+    raise ErrDimensionMismatch, "Expected a value, got a #{value.class}" if value.respond_to?(:to_matrix)
 
     @rows[row][col] = value
   end
@@ -532,7 +532,8 @@ class Matrix
   alias map! collect!
 
   def freeze
-    @rows.freeze
+    @rows.each(&:freeze).freeze
+
     super
   end
 
@@ -1015,7 +1016,7 @@ class Matrix
   #++
 
   #
-  # Returns +true+ if and only if the two matrices contain equal elements.
+  # Returns whether the two matrices contain equal elements.
   #
   def ==(other)
     return false unless Matrix === other &&
@@ -1233,26 +1234,49 @@ class Matrix
   #   #  => 67 96
   #   #     48 99
   #
-  def **(other)
-    case other
+  def **(exp)
+    case exp
     when Integer
-      x = self
-      if other <= 0
-        x = self.inverse
-        return self.class.identity(self.column_count) if other == 0
-        other = -other
-      end
-      z = nil
-      loop do
-        z = z ? z * x : x if other[0] == 1
-        return z if (other >>= 1).zero?
-        x *= x
+      case
+      when exp == 0
+        raise ErrDimensionMismatch unless square?
+        self.class.identity(column_count)
+      when exp < 0
+        inverse.power_int(-exp)
+      else
+        power_int(exp)
       end
     when Numeric
       v, d, v_inv = eigensystem
-      v * self.class.diagonal(*d.each(:diagonal).map{|e| e ** other}) * v_inv
+      v * self.class.diagonal(*d.each(:diagonal).map{|e| e ** exp}) * v_inv
     else
-      raise ErrOperationNotDefined, ["**", self.class, other.class]
+      raise ErrOperationNotDefined, ["**", self.class, exp.class]
+    end
+  end
+
+  protected def power_int(exp)
+    # assumes `exp` is an Integer > 0
+    #
+    # Previous algorithm:
+    #   build M**2, M**4 = (M**2)**2, M**8, ... and multiplying those you need
+    #   e.g. M**0b1011 = M**11 = M * M**2 * M**8
+    #                              ^  ^
+    #   (highlighted the 2 out of 5 multiplications involving `M * x`)
+    #
+    # Current algorithm has same number of multiplications but with lower exponents:
+    #    M**11 = M * (M * M**4)**2
+    #              ^    ^  ^
+    #   (highlighted the 3 out of 5 multiplications involving `M * x`)
+    #
+    # This should be faster for all (non nil-potent) matrices.
+    case
+    when exp == 1
+      self
+    when exp.odd?
+      self * power_int(exp - 1)
+    else
+      sqrt = power_int(exp / 2)
+      sqrt * sqrt
     end
   end
 
@@ -1432,6 +1456,35 @@ class Matrix
   def rank_e
     warn "Matrix#rank_e is deprecated; use #rank", uplevel: 1
     rank
+  end
+
+  #
+  # Returns a new matrix with rotated elements.
+  # The argument specifies the rotation (defaults to `:clockwise`):
+  # * :clockwise, 1, -3, etc.: "turn right" - first row becomes last column
+  # * :half_turn, 2, -2, etc.: first row becomes last row, elements in reverse order
+  # * :counter_clockwise, -1, 3: "turn left" - first row becomes first column
+  #   (but with elements in reverse order)
+  #
+  #   m = Matrix[ [1, 2], [3, 4] ]
+  #   r = m.rotate_entries(:clockwise)
+  #   #  => Matrix[[3, 1], [4, 2]]
+  #
+  def rotate_entries(rotation = :clockwise)
+    rotation %= 4 if rotation.respond_to? :to_int
+
+    case rotation
+    when 0
+      dup
+    when 1, :clockwise
+      new_matrix @rows.transpose.each(&:reverse!), row_count
+    when 2, :half_turn
+      new_matrix @rows.map(&:reverse).reverse!, column_count
+    when 3, :counter_clockwise
+      new_matrix @rows.transpose.reverse!, row_count
+    else
+      raise ArgumentError, "expected #{rotation.inspect} to be one of :clockwise, :counter_clockwise, :half_turn or an integer"
+    end
   end
 
   # Returns a matrix with entries rounded to the given precision
@@ -2081,7 +2134,7 @@ class Vector
   #++
 
   #
-  # Returns +true+ iff all of vectors are linearly independent.
+  # Returns whether all of vectors are linearly independent.
   #
   #   Vector.independent?(Vector[1,0], Vector[0,1])
   #   #  => true
@@ -2099,7 +2152,7 @@ class Vector
   end
 
   #
-  # Returns +true+ iff all of vectors are linearly independent.
+  # Returns whether all of vectors are linearly independent.
   #
   #   Vector[1,0].independent?(Vector[0,1])
   #   # => true
@@ -2112,12 +2165,15 @@ class Vector
   end
 
   #
-  # Returns +true+ iff all elements are zero.
+  # Returns whether all elements are zero.
   #
   def zero?
     all?(&:zero?)
   end
 
+  #
+  # Makes the matrix frozen and Ractor-shareable
+  #
   def freeze
     @elements.freeze
     super
@@ -2137,7 +2193,7 @@ class Vector
   #++
 
   #
-  # Returns +true+ iff the two vectors have the same elements in the same order.
+  # Returns whether the two vectors have the same elements in the same order.
   #
   def ==(other)
     return false unless Vector === other

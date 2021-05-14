@@ -38,7 +38,7 @@ class Gem::FakeFetcher
     @paths = []
   end
 
-  def find_data(path, nargs = 3)
+  def find_data(path)
     return Gem.read_binary path.path if URI === path and 'file' == path.scheme
 
     if URI === path and "URI::#{path.scheme.upcase}" != path.class.name
@@ -54,10 +54,11 @@ class Gem::FakeFetcher
       raise Gem::RemoteFetcher::FetchError.new("no data for #{path}", path)
     end
 
-    data = @data[path]
-
-    data.flatten! and return data.shift(nargs) if data.respond_to?(:flatten!)
-    data
+    if @data[path].kind_of?(Array) && @data[path].first.kind_of?(Array)
+      @data[path].shift
+    else
+      @data[path]
+    end
   end
 
   def fetch_path(path, mtime = nil, head = false)
@@ -75,7 +76,7 @@ class Gem::FakeFetcher
 
   def cache_update_path(uri, path = nil, update = true)
     if data = fetch_path(uri)
-      open(path, 'wb') {|io| io.write data } if path and update
+      File.open(path, 'wb') {|io| io.write data } if path and update
       data
     else
       Gem.read_binary(path) if path

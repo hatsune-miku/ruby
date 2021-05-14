@@ -448,6 +448,12 @@ class TestMatrix < Test::Unit::TestCase
     assert_equal(Matrix[[67,96],[48,99]], Matrix[[7,6],[3,9]] ** 2)
     assert_equal(Matrix.I(5), Matrix.I(5) ** -1)
     assert_raise(Matrix::ErrOperationNotDefined) { Matrix.I(5) ** Object.new }
+
+    m = Matrix[[0,2],[1,0]]
+    exp = 0b11101000
+    assert_equal(Matrix.scalar(2, 1 << (exp/2)), m ** exp)
+    exp = 0b11101001
+    assert_equal(Matrix[[0, 2 << (exp/2)], [1 << (exp/2), 0]], m ** exp)
   end
 
   def test_det
@@ -811,5 +817,72 @@ class TestMatrix < Test::Unit::TestCase
   def test_adjoint
     assert_equal(Matrix[[(1-2i), 1], [(0-1i), 2], [0, 3]], @c1.adjoint)
     assert_equal(Matrix.empty(0,2), @e1.adjoint)
+  end
+
+  def test_ractor
+    assert_ractor(<<~RUBY, require: 'matrix')
+      obj1 = Matrix[[1, 2], [3, 4]].freeze
+
+      obj2 = Ractor.new obj1 do |obj|
+        obj
+      end.take
+      assert_same obj1, obj2
+    RUBY
+  end if defined?(Ractor)
+
+  def test_rotate_with_symbol
+    assert_equal(Matrix[[4, 1], [5, 2], [6, 3]], @m1.rotate_entries)
+    assert_equal(@m1.rotate_entries, @m1.rotate_entries(:clockwise))
+    assert_equal(Matrix[[4, 1], [5, 2], [6, 3]],
+                 @m1.rotate_entries(:clockwise))
+    assert_equal(Matrix[[3, 6], [2, 5], [1, 4]],
+                 @m1.rotate_entries(:counter_clockwise))
+    assert_equal(Matrix[[6, 5, 4], [3, 2, 1]],
+                 @m1.rotate_entries(:half_turn))
+    assert_equal(Matrix[[6, 5, 4], [3, 2, 1]],
+                 @m1.rotate_entries(:half_turn))
+    assert_equal(Matrix.empty(0,2),
+                 @e1.rotate_entries(:clockwise))
+    assert_equal(Matrix.empty(0,2),
+                 @e1.rotate_entries(:counter_clockwise))
+    assert_equal(Matrix.empty(2,0),
+                 @e1.rotate_entries(:half_turn))
+    assert_equal(Matrix.empty(0,3),
+                 @e2.rotate_entries(:half_turn))
+  end
+
+  def test_rotate_with_numeric
+    assert_equal(Matrix[[4, 1], [5, 2], [6, 3]],
+                 @m1.rotate_entries(1))
+    assert_equal(@m2.rotate_entries(:half_turn),
+                 @m2.rotate_entries(2))
+    assert_equal(@m2.rotate_entries(:half_turn),
+                 @m1.rotate_entries(2))
+    assert_equal(@m1.rotate_entries(:counter_clockwise),
+                 @m1.rotate_entries(3))
+    assert_equal(@m1,
+                 @m1.rotate_entries(4))
+    assert_equal(@m1,
+                 @m1.rotate_entries(4))
+    assert_not_same(@m1,
+                    @m1.rotate_entries(4))
+    assert_equal(@m1.rotate_entries(:clockwise),
+                 @m1.rotate_entries(5))
+    assert_equal(Matrix.empty(0,2),
+                 @e1.rotate_entries(1))
+    assert_equal(@e2,
+                 @e2.rotate_entries(2))
+    assert_equal(@e2.rotate_entries(1),
+                 @e2.rotate_entries(3))
+    assert_equal(@e2.rotate_entries(:counter_clockwise),
+                 @e2.rotate_entries(-1))
+    assert_equal(@m1.rotate_entries(:counter_clockwise),
+                 @m1.rotate_entries(-1))
+    assert_equal(Matrix[[6, 5, 4], [3, 2, 1]],
+                 @m1.rotate_entries(-2))
+    assert_equal(@m1,
+                 @m1.rotate_entries(-4))
+    assert_equal(@m1.rotate_entries(-1),
+                 @m1.rotate_entries(-5))
   end
 end

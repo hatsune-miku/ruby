@@ -51,7 +51,7 @@ class TestGemCommandsSpecificationCommand < Gem::TestCase
     @cmd.options[:all] = true
     @cmd.options[:version] = "1"
 
-    assert_raises Gem::MockGemUi::TermError do
+    assert_raise Gem::MockGemUi::TermError do
       use_ui @ui do
         @cmd.execute
       end
@@ -64,7 +64,7 @@ class TestGemCommandsSpecificationCommand < Gem::TestCase
   def test_execute_bad_name
     @cmd.options[:args] = %w[foo]
 
-    assert_raises Gem::MockGemUi::TermError do
+    assert_raise Gem::MockGemUi::TermError do
       use_ui @ui do
         @cmd.execute
       end
@@ -78,7 +78,7 @@ class TestGemCommandsSpecificationCommand < Gem::TestCase
     @cmd.options[:args] = %w[foo]
     @cmd.options[:version] = "1.3.2"
 
-    assert_raises Gem::MockGemUi::TermError do
+    assert_raise Gem::MockGemUi::TermError do
       use_ui @ui do
         @cmd.execute
       end
@@ -184,6 +184,34 @@ class TestGemCommandsSpecificationCommand < Gem::TestCase
     spec = Gem::Specification.from_yaml @ui.output
 
     assert_equal Gem::Version.new("1"), spec.version
+  end
+
+  def test_execute_remote_with_version_and_platform
+    original_platforms = Gem.platforms.dup
+
+    spec_fetcher do |fetcher|
+      fetcher.spec 'foo', "1"
+      fetcher.spec 'foo', "1" do |s|
+        s.platform = 'x86_64-linux'
+      end
+    end
+
+    @cmd.options[:args] = %w[foo]
+    @cmd.options[:version] = "1"
+    @cmd.options[:domain] = :remote
+    @cmd.options[:added_platform] = true
+    Gem.platforms = [Gem::Platform::RUBY, Gem::Platform.new("x86_64-linux")]
+
+    use_ui @ui do
+      @cmd.execute
+    end
+
+    spec = Gem::Specification.from_yaml @ui.output
+
+    assert_equal Gem::Version.new("1"), spec.version
+    assert_equal Gem::Platform.new("x86_64-linux"), spec.platform
+  ensure
+    Gem.platforms = original_platforms
   end
 
   def test_execute_remote_without_prerelease

@@ -425,7 +425,7 @@ class FTPTest < Test::Unit::TestCase
           end
           conn.print(l, "\r\n")
         end
-      rescue Errno::EPIPE
+      rescue Errno::EPIPE, Errno::ECONNRESET
       ensure
         assert_nil($!)
         conn.close
@@ -762,7 +762,7 @@ class FTPTest < Test::Unit::TestCase
     begin
       begin
         ftp = Net::FTP.new
-        ftp.read_timeout *= 5 if RubyVM::MJIT.enabled? # for --jit-wait
+        ftp.read_timeout *= 5 if defined?(RubyVM::JIT) && RubyVM::JIT.enabled? # for --jit-wait
         ftp.connect(SERVER_ADDR, server.port)
         ftp.login
         assert_match(/\AUSER /, commands.shift)
@@ -807,7 +807,7 @@ class FTPTest < Test::Unit::TestCase
     begin
       begin
         ftp = Net::FTP.new
-        ftp.read_timeout *= 5 if RubyVM::MJIT.enabled? # for --jit-wait
+        ftp.read_timeout *= 5 if defined?(RubyVM::JIT) && RubyVM::JIT.enabled? # for --jit-wait
         ftp.connect(SERVER_ADDR, server.port)
         ftp.login
         assert_match(/\AUSER /, commands.shift)
@@ -874,6 +874,40 @@ class FTPTest < Test::Unit::TestCase
         assert_match(/\A(PORT|EPRT) /, commands.shift)
         assert_equal("RETR foo\r\n", commands.shift)
         assert_equal(nil, commands.shift)
+      ensure
+        ftp.close if ftp
+      end
+    ensure
+      server.close
+    end
+  end
+
+  def test_getbinaryfile_error
+    commands = []
+    server = create_ftp_server { |sock|
+      sock.print("220 (test_ftp).\r\n")
+      commands.push(sock.gets)
+      sock.print("331 Please specify the password.\r\n")
+      commands.push(sock.gets)
+      sock.print("230 Login successful.\r\n")
+      commands.push(sock.gets)
+      sock.print("200 Switching to Binary mode.\r\n")
+      line = sock.gets
+      commands.push(line)
+      sock.print("450 No Dice\r\n")
+    }
+    begin
+      begin
+        ftp = Net::FTP.new
+        ftp.passive = true
+        ftp.read_timeout *= 5 if defined?(RubyVM::JIT) && RubyVM::JIT.enabled? # for --jit-wait
+        ftp.connect(SERVER_ADDR, server.port)
+        ftp.login
+        assert_match(/\AUSER /, commands.shift)
+        assert_match(/\APASS /, commands.shift)
+        assert_equal("TYPE I\r\n", commands.shift)
+        assert_raise(Net::FTPTempError) {ftp.getbinaryfile("foo", nil)}
+        assert_match(/\A(PASV|EPSV)\r\n/, commands.shift)
       ensure
         ftp.close if ftp
       end
@@ -1545,7 +1579,7 @@ EOF
     begin
       begin
         ftp = Net::FTP.new
-        ftp.read_timeout *= 5 if RubyVM::MJIT.enabled? # for --jit-wait
+        ftp.read_timeout *= 5 if defined?(RubyVM::JIT) && RubyVM::JIT.enabled? # for --jit-wait
         ftp.connect(SERVER_ADDR, server.port)
         assert_equal(['LANG EN*', 'UTF8'], ftp.features)
         assert_equal("FEAT\r\n", commands.shift)
@@ -1568,7 +1602,7 @@ EOF
     begin
       begin
         ftp = Net::FTP.new
-        ftp.read_timeout *= 5 if RubyVM::MJIT.enabled? # for --jit-wait
+        ftp.read_timeout *= 5 if defined?(RubyVM::JIT) && RubyVM::JIT.enabled? # for --jit-wait
         ftp.connect(SERVER_ADDR, server.port)
         assert_raise(Net::FTPPermError) do
           ftp.features
@@ -1594,7 +1628,7 @@ EOF
     begin
       begin
         ftp = Net::FTP.new
-        ftp.read_timeout *= 5 if RubyVM::MJIT.enabled? # for --jit-wait
+        ftp.read_timeout *= 5 if defined?(RubyVM::JIT) && RubyVM::JIT.enabled? # for --jit-wait
         ftp.connect(SERVER_ADDR, server.port)
         ftp.option("UTF8", "ON")
         assert_equal("OPTS UTF8 ON\r\n", commands.shift)
@@ -1653,7 +1687,7 @@ EOF
     begin
       begin
         ftp = Net::FTP.new
-        ftp.read_timeout *= 5 if RubyVM::MJIT.enabled? # for --jit-wait
+        ftp.read_timeout *= 5 if defined?(RubyVM::JIT) && RubyVM::JIT.enabled? # for --jit-wait
         ftp.connect(SERVER_ADDR, server.port)
         entry = ftp.mlst("foo")
         assert_equal("/foo", entry.pathname)
@@ -1740,7 +1774,7 @@ EOF
     begin
       begin
         ftp = Net::FTP.new
-        ftp.read_timeout *= 5 if RubyVM::MJIT.enabled? # for --jit-wait
+        ftp.read_timeout *= 5 if defined?(RubyVM::JIT) && RubyVM::JIT.enabled? # for --jit-wait
         ftp.connect(SERVER_ADDR, server.port)
         ftp.login
         assert_match(/\AUSER /, commands.shift)
@@ -1779,7 +1813,7 @@ EOF
 
   def test_parse257
     ftp = Net::FTP.new
-    ftp.read_timeout *= 5 if RubyVM::MJIT.enabled? # for --jit-wait
+    ftp.read_timeout *= 5 if defined?(RubyVM::JIT) && RubyVM::JIT.enabled? # for --jit-wait
     assert_equal('/foo/bar',
                  ftp.send(:parse257, '257 "/foo/bar" directory created'))
     assert_equal('/foo/bar"baz',
@@ -1918,7 +1952,7 @@ EOF
                          port: port,
                          ssl: { ca_file: CA_FILE },
                          passive: false)
-      ftp.read_timeout *= 5 if RubyVM::MJIT.enabled? # for --jit-wait
+      ftp.read_timeout *= 5 if defined?(RubyVM::JIT) && RubyVM::JIT.enabled? # for --jit-wait
       begin
         assert_equal("AUTH TLS\r\n", commands.shift)
         assert_equal("PBSZ 0\r\n", commands.shift)
@@ -1935,7 +1969,7 @@ EOF
         assert_equal(nil, commands.shift)
         # FIXME: The new_session_cb is known broken for clients in OpenSSL 1.1.0h.
         # See https://github.com/openssl/openssl/pull/5967 for details.
-        if OpenSSL::OPENSSL_LIBRARY_VERSION !~ /OpenSSL 1.1.0h/
+        if OpenSSL::OPENSSL_LIBRARY_VERSION !~ /OpenSSL 1.1.0h|LibreSSL/
           assert_equal(true, session_reused_for_data_connection)
         end
       ensure
@@ -2003,7 +2037,7 @@ EOF
                          port: port,
                          ssl: { ca_file: CA_FILE },
                          passive: true)
-      ftp.read_timeout *= 5 if RubyVM::MJIT.enabled? # for --jit-wait
+      ftp.read_timeout *= 5 if defined?(RubyVM::JIT) && RubyVM::JIT.enabled? # for --jit-wait
       begin
         assert_equal("AUTH TLS\r\n", commands.shift)
         assert_equal("PBSZ 0\r\n", commands.shift)
@@ -2019,7 +2053,7 @@ EOF
         assert_equal("RETR foo\r\n", commands.shift)
         assert_equal(nil, commands.shift)
         # FIXME: The new_session_cb is known broken for clients in OpenSSL 1.1.0h.
-        if OpenSSL::OPENSSL_LIBRARY_VERSION !~ /OpenSSL 1.1.0h/
+        if OpenSSL::OPENSSL_LIBRARY_VERSION !~ /OpenSSL 1.1.0h|LibreSSL/
           assert_equal(true, session_reused_for_data_connection)
         end
       ensure
@@ -2079,7 +2113,7 @@ EOF
                          ssl: { ca_file: CA_FILE },
                          private_data_connection: false,
                          passive: false)
-      ftp.read_timeout *= 5 if RubyVM::MJIT.enabled? # for --jit-wait
+      ftp.read_timeout *= 5 if defined?(RubyVM::JIT) && RubyVM::JIT.enabled? # for --jit-wait
       begin
         assert_equal("AUTH TLS\r\n", commands.shift)
         ftp.login
@@ -2149,7 +2183,7 @@ EOF
                          ssl: { ca_file: CA_FILE },
                          private_data_connection: false,
                          passive: true)
-      ftp.read_timeout *= 5 if RubyVM::MJIT.enabled? # for --jit-wait
+      ftp.read_timeout *= 5 if defined?(RubyVM::JIT) && RubyVM::JIT.enabled? # for --jit-wait
       begin
         assert_equal("AUTH TLS\r\n", commands.shift)
         ftp.login
@@ -2230,7 +2264,7 @@ EOF
         ftp = Net::FTP.new(SERVER_NAME,
                            port: server.port,
                            ssl: { ca_file: CA_FILE })
-        ftp.read_timeout *= 5 if RubyVM::MJIT.enabled? # for --jit-wait
+        ftp.read_timeout *= 5 if defined?(RubyVM::JIT) && RubyVM::JIT.enabled? # for --jit-wait
         assert_equal("AUTH TLS\r\n", commands.shift)
         assert_equal("PBSZ 0\r\n", commands.shift)
         assert_equal("PROT P\r\n", commands.shift)
@@ -2283,7 +2317,7 @@ EOF
           begin
             ftp = Net::FTP.new
             ftp.resume = resume
-            ftp.read_timeout = (defined?(RubyVM::MJIT) && RubyVM::MJIT.enabled?) ? 300 : 0.2 # use large timeout for --jit-wait
+            ftp.read_timeout = (defined?(RubyVM::JIT) && RubyVM::JIT.enabled?) ? 300 : 0.2 # use large timeout for --jit-wait
             ftp.connect(SERVER_ADDR, server.port)
             ftp.login
             assert_match(/\AUSER /, commands.shift)
@@ -2342,7 +2376,7 @@ EOF
       chdir_to_tmpdir do
         begin
           ftp = Net::FTP.new
-          ftp.read_timeout *= 5 if RubyVM::MJIT.enabled? # for --jit-wait
+          ftp.read_timeout *= 5 if defined?(RubyVM::JIT) && RubyVM::JIT.enabled? # for --jit-wait
           ftp.connect(SERVER_ADDR, server.port)
           ftp.login
           assert_match(/\AUSER /, commands.shift)
@@ -2393,7 +2427,7 @@ EOF
         File.binwrite("./|echo hello", binary_data)
         begin
           ftp = Net::FTP.new
-          ftp.read_timeout = RubyVM::MJIT.enabled? ? 300 : 0.2 # use large timeout for --jit-wait
+          ftp.read_timeout = defined?(RubyVM::JIT) && RubyVM::JIT.enabled? ? 300 : 0.2 # use large timeout for --jit-wait
           ftp.connect(SERVER_ADDR, server.port)
           ftp.login
           assert_match(/\AUSER /, commands.shift)
@@ -2448,7 +2482,7 @@ EOF
         end
         begin
           ftp = Net::FTP.new
-          ftp.read_timeout *= 5 if RubyVM::MJIT.enabled? # for --jit-wait
+          ftp.read_timeout *= 5 if defined?(RubyVM::JIT) && RubyVM::JIT.enabled? # for --jit-wait
           ftp.connect(SERVER_ADDR, server.port)
           ftp.login
           assert_match(/\AUSER /, commands.shift)
@@ -2472,6 +2506,23 @@ EOF
     ensure
       server.close
     end
+  end
+
+  def test_time_parser
+    s = "20371231000000"
+    assert_equal(Time.utc(2037, 12, 31, 0, 0, 0),
+                 Net::FTP::TIME_PARSER[s])
+    s = "20371231000000.123456"
+    assert_equal(Time.utc(2037, 12, 31, 0, 0, 0, 123456),
+                 Net::FTP::TIME_PARSER[s])
+    s = "20371231000000." + "9" * 999999
+    assert_equal(Time.utc(2037, 12, 31, 0, 0, 0,
+                          99999999999999999r / 100000000000),
+                 Net::FTP::TIME_PARSER[s])
+    e = assert_raise(Net::FTPProtoError) {
+      Net::FTP::TIME_PARSER["x" * 999999]
+    }
+    assert_equal("invalid time-val: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...", e.message)
   end
 
   private
